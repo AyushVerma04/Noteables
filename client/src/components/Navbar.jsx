@@ -25,6 +25,7 @@ export default function Navbar() {
           <NavLink to="/" end>Home</NavLink>
           <NavLink to="/discover">Discover</NavLink>
           {user && <NavLink to="/upload">Upload</NavLink>}
+          {user && <NavLink to="/workspace">Workspace</NavLink>}
           {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
         </div>
 
@@ -63,6 +64,7 @@ export default function Navbar() {
         <Link to="/" onClick={() => setMenuOpen(false)}>Home</Link>
         <Link to="/discover" onClick={() => setMenuOpen(false)}>Discover</Link>
         {user && <Link to="/upload" onClick={() => setMenuOpen(false)}>Upload</Link>}
+        {user && <Link to="/workspace" onClick={() => setMenuOpen(false)}>Workspace</Link>}
         {user?.role === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Admin</Link>}
         {user ? (
           <button onClick={handleLogout}>Logout ({user.email.split('@')[0]})</button>

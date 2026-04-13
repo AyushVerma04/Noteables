@@ -1,57 +1,130 @@
-# Noteables - Phase 1 MVP Specification (Production-Grade Architecture)
+# Noteables - The AI-Powered College Notes Platform
 
-## Context for AI Agent
-You are an expert Senior Full-Stack Engineer. Your task is to build Phase 1 of "Noteables," a secure, admin-controlled document management system for college students. 
+Noteables is a comprehensive, AI-enhanced knowledge management system specifically designed for college students and professionals. It provides a rich text workspace (the "Personal Workspace"), advanced RAG (Retrieval-Augmented Generation) AI functionalities (Nexus AI), dynamic studying mechanisms (Flashcard Engine, Podcast Studio), and an interactive 3D Knowledge Graph (Omni-Brain).
 
-**CRITICAL DIRECTIVE:** The user is providing UI inspiration via Stitch MCP server. Use this inspiration to build the frontend, but you MUST adapt it to be fully mobile-responsive. 
-Do NOT implement actual AI, RAG, or OCR logic in this phase. Focus strictly on working Role-Based Access Control (RBAC), secure file handling, and a flawless responsive UI.
+The platform's UI follows the **"Kinetic Alchemist"** design system, creating a highly polished, interactive, dark-mode-first aesthetic with deep glassmorphism and smooth micro-animations.
 
-## ⚠️ STRICT SDE-LEVEL CONSTRAINTS
+## 🌟 Key Features
 
-1. **Presigned URL Uploads ONLY (Supabase):** - NEVER upload files through the Express server disk/memory. 
-   - Use `@supabase/supabase-js` (`supabase.storage.from('bucket_name').createSignedUploadUrl()`) on the Node backend using the Service Role Key.
-   - React requests the ticket, PUTs the file directly to Supabase, and Node saves the final public URL in MongoDB.
-2. **Mobile-First Responsiveness & UI Polish:**
-   - The UI must be fully responsive (mobile, tablet, desktop) using modern CSS/Tailwind. 
-   - Implement Skeleton Loaders for data fetching and Toast notifications for all success/error states.
-3. **In-App Viewing:** - PDFs: Use `react-pdf` or `<object>`. 
-   - PPTs: Route the Supabase URL through the Google Docs Viewer iframe (`https://docs.google.com/gview?url={YOUR_SUPABASE_URL}&embedded=true`).
-4. **Compound Slugs:** - Documents must use generated slugs for routing/searching (e.g., `year2-sem3-math-smith-unit1-xyz123`).
+- **Nexus AI Assistant**: Chat with your documents using Groq LLMs and Local Embeddings via a high-performance RAG pipeline.
+- **Omni-Brain Knowledge Graph**: Visualize the connections between logic, concepts, and notes across your entire repository in an interactive 3D space.
+- **Rich Text Workspace**: A robust, Notion-like editor utilizing TipTap with seamless Supabase-backed image uploading and code syntax highlighting.
+- **Podcast Studio (TTS)**: Stream summaries, notes, and concepts to audio using advanced Text-to-Speech integration.
+- **Flashcard Engine**: Automatically generate and study flashcards based on the material in your workspace via AI extraction.
+- **Granular Access Control**: Role-Based Access Control (RBAC) separating student access from a dedicated Admin Dashboard for global oversight.
 
-## 🔮 FORWARD-COMPATIBILITY (Hardcoded UI Stubs)
-You must build the UI layout to accommodate Phase 2 AI features, but hardcode the data for now. 
-When building the `/view/:slugId` Document Viewer, include:
-- **"Chat with Notes" Sidebar:** A visually complete chat interface panel (input box, send button, fake AI messages) that is currently inert.
-- **Podcast/Audio Player:** A modern audio player UI component at the top of the notes with a "Generate Audio" button that currently just shows a "Coming in Phase 2" toast notification.
-- **OCR Tag Pills:** A section under the title displaying hardcoded tags like `[AI Generated]`, `[Handwritten]`, `[Scanned]`.
+---
 
-## Core Schema Requirements (MongoDB)
+## 🏛️ Architecture & Tech Stack
 
-**User Schema:** `email`, `passwordHash` (bcrypt), `role` (Enum: "student", "admin"), `reputationPoints`.
-**Note Schema:**
-- `title`, `fileUrl` (Supabase Public URL), `fileType` ("pdf", "ppt"), `status` ("pending", "approved", "rejected"), `uploaderId` (Ref to User), `slugId`.
-- `metadata`: { `year`, `semester`, `subject`, `teacher`, `unit` }
-- `upvotes`, `downvotes` (Arrays of User IDs), `comments`: [{ `userId`, `text`, `timestamp` }]
+Noteables uses a decoupled Node.js Backend and React Frontend architecture, optimizing for robust document handling and inference latency.
 
-## Execution Plan (Awaiting Approval per Step)
+### Frontend (Client)
+- **Framework**: React 19 + Vite
+- **Routing**: React Router DOM (v7)
+- **Editor**: TipTap (Headless WYSIWYG based on ProseMirror)
+- **3D Visualization**: `react-force-graph-3d` & `three.js` designed for mapping concept relations.
+- **Icons & Styling**: Lucide React, React Icons, and Custom Vanilla CSS built purely around the distinct Kinetic Alchemist aesthetic.
+- **State Management & Notifications**: React Hooks & React Hot Toast
 
-### Step 1: Foundation & Auth
-- Initialize Vite React app and Node.js Express server.
-- Set up responsive persistent navigation (Login, Register, Mobile Hamburger Menu).
-- Implement JWT Auth. Admin panel link should only appear for Admin roles.
+### Backend (Server)
+- **Runtime**: Node.js + Express
+- **Database (Primary DB)**: MongoDB Atlas (via Mongoose) for user state, notes metadata, and platform relationships.
+- **Database (Vector/Blob)**: Supabase (PostgreSQL pgvector, Storage Buckets) for high-performance vector retrieval and asset storage.
+- **Authentication**: Custom JWT (JSON Web Tokens) & `bcryptjs`
+- **AI/ML Pipeline**: 
+  - LangChain for RAG orchestration and data ingestion formatting.
+  - `@xenova/transformers` for generating document embeddings completely locally via Transformers.js.
+  - Groq SDK (`@langchain/groq`) for ultra-fast language model inference.
+  - `node-edge-tts` for real-time Text-to-Speech audio streaming.
+- **File Parsing**: `pdf-parse` for semantic document extraction.
 
-### Step 2: The Upload Pipeline & Admin Queue
-- Build the `/api/upload/generate-url` Supabase endpoint.
-- **Student View:** Responsive upload form with dependent dropdowns (Year -> Semester -> Subject). Uploads save to MongoDB as `status: "pending"`.
-- **Admin View:** A dashboard table to review, approve, or reject pending uploads.
+---
 
-### Step 3: Discovery & Search
-- Build the responsive homepage. Include dependent dropdown filters.
-- Query MongoDB for `status: "approved"` notes matching filters.
-- Display results in responsive cards showing title, metadata, and upvotes.
+## 🧠 System Workflow (The AI Pipeline)
 
-### Step 4: The Document Viewer & Social Features
-- Create `/view/:slugId`.
-- **Desktop Layout:** Document viewer left/center, Chat UI stub and Comments on the right.
-- **Mobile Layout:** Stacked view (Document -> Chat Stub -> Comments).
-- Implement working API routes for Upvote/Downvote and Comments.
+1. **Document Ingestion**: Users write notes in the TipTap rich text workspace or upload documents.
+2. **Vector Embedding Processing**: The Node backend receives the text, chunks it using Langchain's `TextSplitters`, runs it through a local Transformer model to generate vector embeddings, and instantly syncs these vectors into Supabase's `pgvector` database. 
+3. **Retrieval-Augmented Generation (RAG)**: When a user requests help from Nexus AI, the backend embeds the user's query, searches Supabase for semantic text chunks matching the query, and feeds both the context and prompt to Groq for sub-second, highly contextual responses.
+4. **Data Visualization**: Omni-Brain continuously maps metadata and semantic links via MongoDB, requesting graphical relationship data from the backend to render the 3D force-directed graph on the client.
+
+---
+
+## 🚀 Setting Up the Project Locally
+
+### Prerequisites
+Before you begin, ensure you have the following installed:
+- Node.js (v18+)
+- Active MongoDB Atlas cluster
+- Active Supabase project
+- Groq API Key
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/AyushVerma04/Noteables.git
+cd Noteables
+```
+
+### 2. Environment Variables Setup
+You will need to configure `.env` files within both the `client` and `server` directories.
+
+**Create `.env` inside `/server`**:
+```env
+PORT=5000
+MONGODB_URI=your_mongodb_cluster_uri
+JWT_SECRET=your_jwt_secret_key
+GROQ_API_KEY=your_groq_api_key
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_key
+```
+
+**Create `.env` inside `/client`**:
+```env
+VITE_API_URL=http://localhost:5000
+```
+*(Check your client API instances to confirm the exact `VITE_` variable name needed).*
+
+### 3. Start the Server
+Navigate to the `server` directory, install dependencies, and start the development server.
+```bash
+cd server
+npm install
+npm run dev
+```
+
+### 4. Start the Client
+Open a new terminal session, navigate to the `client` directory, install dependencies, and start Vite.
+```bash
+cd client
+npm install
+npm run dev
+```
+The frontend should now be successfully running on `http://localhost:5173`.
+
+---
+
+## 📁 Repository Structure
+```
+Noteables/
+├── client/                 # React Frontend Application
+│   ├── src/
+│   │   ├── components/     # Reusable UI components & Kinetic Alchemist Shell
+│   │   ├── pages/          # Full page views (Workspace, Chat, Admin, etc.)
+│   │   ├── context/        # React context providers (Auth)
+│   │   ├── assets/         # Static assets and global styling
+│   │   └── App.jsx         # App Entry & Routing
+│   ├── index.html
+│   └── package.json
+└── server/                 # Node.js Express Backend
+    ├── models/             # Mongoose schemas (User, Document, etc.)
+    ├── routes/             # Protected and public Express API endpoints
+    ├── controllers/        # Request handling logic
+    ├── services/           # External business logic (Langchain, TTS, Supabase connection)
+    ├── index.js            # Express server configuration
+    └── package.json
+```
+
+## 🛡️ Security / Deployment Notes
+- This project leverages `.gitignore` locally to protect sensitive environment configurations. 
+- Deployment is configured for platforms supporting decoupled hosting (e.g. Render/Railway for the server and Vercel/Netlify for the Vite app).
+- Admin-related routes heavily rely on verified JWTs determining backend Role-Based Access Control logic.

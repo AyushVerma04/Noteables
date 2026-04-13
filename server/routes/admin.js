@@ -1,6 +1,7 @@
 const express = require('express');
 const Note = require('../models/Note');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const { embedDocument } = require('./ai');
 
 const router = express.Router();
 
@@ -30,6 +31,13 @@ router.patch('/notes/:id', authenticate, requireAdmin, async (req, res) => {
     ).populate('uploaderId', 'email');
 
     if (!note) return res.status(404).json({ error: 'Note not found' });
+
+    // If approved, trigger AI embedding pipeline in the background
+    if (status === 'approved' && note.fileType === 'pdf') {
+      embedDocument(note._id.toString()).catch(err => {
+        console.error('Background embedding error:', err.message);
+      });
+    }
 
     res.json(note);
   } catch (err) {

@@ -23,6 +23,13 @@ const noteSchema = new mongoose.Schema({
   upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   downvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   comments: [commentSchema],
+  // Phase 2: AI fields
+  extractedText: { type: String, default: '' },
+  embeddingStatus: {
+    type: String,
+    enum: ['none', 'processing', 'complete', 'failed'],
+    default: 'none',
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Note', noteSchema);

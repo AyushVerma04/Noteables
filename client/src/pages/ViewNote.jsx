@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import API from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import FlashcardModal from '../components/FlashcardModal';
 
 export default function ViewNote() {
   const { slugId } = useParams();
@@ -12,15 +13,56 @@ export default function ViewNote() {
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Phase 2 AI States
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'ai', content: '👋 Hi! I am the Synapse AI Assistant. Ask me anything about this document.' }
+  ]);
+  const [chatting, setChatting] = useState(false);
+  const messagesEndRef = useRef(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState('none');
+
+  // Audio & Flashcards
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const audioRef = useRef(null);
+  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
+  const [flashcards, setFlashcards] = useState([]);
+  const [showFlashcards, setShowFlashcards] = useState(false);
+
   useEffect(() => {
     fetchNote();
   }, [slugId]);
+
+  useEffect(() => {
+    // Poll embedding status if processing
+    let interval;
+    if (note && note.embeddingStatus === 'processing') {
+      interval = setInterval(async () => {
+        try {
+          const { data } = await API.get(`/ai/status/${note._id}`);
+          setEmbeddingStatus(data.embeddingStatus);
+          setNote(prev => ({ ...prev, embeddingStatus: data.embeddingStatus }));
+          if (data.embeddingStatus !== 'processing') {
+            clearInterval(interval);
+          }
+        } catch (e) {
+          clearInterval(interval);
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [note]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const fetchNote = async () => {
     setLoading(true);
     try {
       const { data } = await API.get(`/notes/${slugId}`);
       setNote(data);
+      setEmbeddingStatus(data.embeddingStatus);
     } catch (err) {
       toast.error('Note not found');
     } finally {
@@ -69,6 +111,154 @@ export default function ViewNote() {
     }
   };
 
+  // Phase 2: RAG Chat Submit
+  const handleChat = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || chatting) return;
+    if (embeddingStatus !== 'complete') {
+      return toast.error('Document AI processing is not complete yet.');
+    }
+
+    const question = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: question }, { role: 'ai', content: '' }]);
+    setChatting(true);
+
+    try {
+      const token = localStorage.getItem('noteables_token');
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/ai/chat/${note._id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ message: question })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Chat sync failed' }));
+        throw new Error(errorData.error);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+            if (dataStr === '[DONE]') continue;
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.error) {
+                toast.error(data.error);
+              } else if (data.content !== undefined) {
+                setChatMessages(prev => {
+                  const newMsgs = [...prev];
+                  const lastIdx = newMsgs.length - 1;
+                  newMsgs[lastIdx] = {
+                    ...newMsgs[lastIdx],
+                    content: newMsgs[lastIdx].content + data.content
+                  };
+                  return newMsgs;
+                });
+              }
+            } catch (e) {
+              console.error('SSE JSON parse error', e);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      toast.error(error.message);
+      setChatMessages(prev => {
+        const newMsgs = [...prev];
+        newMsgs[newMsgs.length - 1].content = 'Sorry, an error occurred while connecting to the AI.';
+        return newMsgs;
+      });
+    } finally {
+      setChatting(false);
+    }
+  };
+
+  // Phase 2: Audio handling
+  const toggleAudio = () => {
+    if (!audioRef.current) {
+      if (embeddingStatus !== 'complete') {
+        return toast.error('Document must be processed by AI first.');
+      }
+      const token = localStorage.getItem('noteables_token');
+      // Set audio source to the streaming endpoint
+      // Using fetch wouldn't easily populate standard <audio>, so we pass token normally in cookies or just URL?
+      // For a secure audio tag, we can hit an endpoint that generates a secure single-use URL, 
+      // or we can use Blob if we fetch. Given EdgeTTS streams perfectly, let's fetch as blob if needed, 
+      // OR for simplicity in MVP, we just expose the streaming endpoint if the backend allows GET without strict auth,
+      // but assuming it needs auth, we'll fetch into a MediaSource or just Blob:
+      toast.loading('Buffering audio stream...', { id: 'audio-toast' });
+      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/audio/stream/${note._id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('Audio generation failed');
+        return res.blob();
+      })
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => setAudioPlaying(false);
+        audio.play();
+        setAudioPlaying(true);
+        toast.success('Audio ready', { id: 'audio-toast' });
+      })
+      .catch(err => toast.error(err.message, { id: 'audio-toast' }));
+    } else {
+      if (audioPlaying) {
+        audioRef.current.pause();
+        setAudioPlaying(false);
+      } else {
+        audioRef.current.play();
+        setAudioPlaying(true);
+      }
+    }
+  };
+
+  // Phase 2: Flashcards
+  const handleGenerateFlashcards = async () => {
+    if (embeddingStatus !== 'complete') {
+      return toast.error('Document must be processed by AI first.');
+    }
+    setIsGeneratingFlashcards(true);
+    const tid = toast.loading('Synapse AI is generating your quiz... (takes ~15s)');
+    try {
+      const { data } = await API.post(`/ai/flashcards/${note._id}`);
+      setFlashcards(data.flashcards);
+      setShowFlashcards(true);
+      toast.success('Flashcards ready!', { id: tid });
+    } catch (err) {
+      toast.error('AI could not generate flashcards. Please try again.', { id: tid });
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+  };
+
+  const handleRetryEmbedding = async () => {
+    try {
+      setEmbeddingStatus('processing');
+      await API.post(`/ai/embed/${note._id}`);
+      toast.success('AI processing restarted');
+    } catch (err) {
+      setEmbeddingStatus('failed');
+      toast.error('Failed to restart AI processing');
+    }
+  };
+
   const getViewerUrl = () => {
     if (!note) return '';
     if (note.fileType === 'pdf') return note.fileUrl;
@@ -103,13 +293,27 @@ export default function ViewNote() {
       <div className="viewer-main">
         {/* Header */}
         <div className="viewer-header">
-          <h1 className="viewer-title">{note.title}</h1>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h1 className="viewer-title">{note.title}</h1>
+            <button 
+              className="btn btn-secondary btn-sm"
+              onClick={handleGenerateFlashcards}
+              disabled={isGeneratingFlashcards || embeddingStatus !== 'complete'}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>style</span>
+              {isGeneratingFlashcards ? 'Generating...' : 'Generate Quiz'}
+            </button>
+          </div>
 
-          {/* OCR Tag Pills (Hardcoded Phase 2 Stub) */}
           <div className="viewer-tags">
-            <span className="badge badge-secondary">AI Generated</span>
-            <span className="badge badge-tertiary">Handwritten</span>
-            <span className="badge badge-primary">Scanned</span>
+            {embeddingStatus === 'complete' && <span className="badge badge-primary">AI Ready</span>}
+            {embeddingStatus === 'processing' && <span className="badge badge-pending">AI Processing...</span>}
+            {embeddingStatus === 'failed' && (
+              <button className="badge badge-failed" onClick={handleRetryEmbedding} title="Click to retry AI mapping">
+                AI Failed (Retry?)
+              </button>
+            )}
+            <span className={`badge badge-${note.fileType}`}>{note.fileType.toUpperCase()}</span>
           </div>
 
           <div className="viewer-meta">
@@ -121,22 +325,31 @@ export default function ViewNote() {
           </div>
         </div>
 
-        {/* Audio Player Stub */}
+        {/* Audio Player */}
         <div className="audio-player-stub">
           <div className="audio-wave">
-            <span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
+            <span style={{ animationPlayState: audioPlaying ? 'running' : 'paused' }}></span>
           </div>
           <div className="audio-info">
             <h4>Podcast Audio</h4>
-            <p>AI-generated audio summary of this document</p>
+            <p>{audioPlaying ? 'Playing AI-generated summary' : 'AI-generated audio summary of this document'}</p>
           </div>
           <button
-            className="btn btn-ai btn-sm"
-            onClick={() => toast('🔮 Text-to-Audio coming in Phase 2!', { icon: '🎙️' })}
+            className={`btn btn-sm ${audioPlaying ? 'btn-secondary' : 'btn-ai'}`}
+            onClick={toggleAudio}
+            disabled={embeddingStatus !== 'complete' && embeddingStatus !== 'processing' && embeddingStatus !== 'failed'} // Let backend reject if no text, but broadly allow if not 'none'
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>spatial_audio_off</span>
-            Generate Audio
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+              {audioPlaying ? 'pause' : 'spatial_audio_off'}
+            </span>
+            {audioPlaying ? 'Pause' : (audioRef.current ? 'Play Audio' : 'Generate Audio')}
           </button>
         </div>
 
@@ -186,43 +399,49 @@ export default function ViewNote() {
 
       {/* Sidebar */}
       <div className="viewer-sidebar">
-        {/* Chat with Notes Stub (Phase 2) */}
+        {/* RAG Chat */}
         <div className="chat-panel">
           <div className="chat-header">
-            <div className="synapse-orb"></div>
-            <h3>Chat with Notes</h3>
-            <span className="badge badge-secondary" style={{ fontSize: '0.6rem' }}>Phase 2</span>
+            <div className={`synapse-orb ${chatting ? 'active' : ''}`}></div>
+            <h3>Synapse AI</h3>
+            <span className={`badge ${embeddingStatus === 'complete' ? 'badge-primary' : 'badge-pending'}`} style={{ fontSize: '0.6rem' }}>
+              {embeddingStatus === 'complete' ? 'Ready' : 'Processing...'}
+            </span>
           </div>
 
           <div className="chat-messages">
-            <div className="chat-msg ai">
-              👋 Hi! I'm the Synapse AI Assistant. In Phase 2, I'll be able to answer questions about this document in real-time.
-            </div>
-            <div className="chat-msg user">
-              What are the key concepts covered?
-            </div>
-            <div className="chat-msg ai">
-              Great question! Once activated, I'll analyze the full document and provide contextual, cited answers from the content.
-            </div>
-            <div className="chat-msg ai">
-              For now, try the comments section below to discuss with other students! 💬
-            </div>
+            {chatMessages.map((msg, i) => (
+              <div className={`chat-msg ${msg.role}`} key={i}>
+                {msg.content}
+                {msg.role === 'ai' && chatting && i === chatMessages.length - 1 && msg.content === '' && (
+                  <span className="text-variant">Thinking...</span>
+                )}
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
           </div>
 
-          <div className="chat-input">
+          <form className="chat-input" onSubmit={handleChat}>
             <input
               type="text"
-              placeholder="Ask about this document..."
-              onClick={() => toast('🔮 Chat with Notes coming in Phase 2!', { icon: '🧠' })}
-              readOnly
+              placeholder={
+                embeddingStatus === 'complete' ? "Ask about this document..." : 
+                embeddingStatus === 'processing' ? "Document processing..." :
+                "AI Processing incomplete."
+              }
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={chatting || embeddingStatus !== 'complete'}
             />
-            <button onClick={() => toast('🔮 Chat with Notes coming in Phase 2!', { icon: '🧠' })}>
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>send</span>
+            <button type="submit" disabled={chatting || !chatInput.trim() || embeddingStatus !== 'complete'}>
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                {chatting ? 'stop_circle' : 'send'}
+              </span>
             </button>
-          </div>
+          </form>
         </div>
 
-        {/* Comments Section (Working) */}
+        {/* Comments Section */}
         <div className="comments-section">
           <h3>
             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chat_bubble</span>
@@ -265,6 +484,15 @@ export default function ViewNote() {
           </form>
         </div>
       </div>
+      
+      {/* Flashcard Modal overlay */}
+      {showFlashcards && (
+        <FlashcardModal 
+          isOpen={showFlashcards} 
+          onClose={() => setShowFlashcards(false)} 
+          flashcards={flashcards} 
+        />
+      )}
     </div>
   );
 }

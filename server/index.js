@@ -30,6 +30,7 @@ app.use('/api/audio', audioRoutes);
 app.use('/api/ai/flashcards', flashcardRoutes);
 app.use('/api/workspace', workspaceRoutes);
 
+app.get('/', (req, res) => res.json({ status: 'ok', message: '🔥 Noteables API is running' }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // Connect to DB and start server

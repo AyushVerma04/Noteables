@@ -31,7 +31,7 @@ export default function NexusAI() {
 
     try {
       const token = localStorage.getItem('noteables_token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/ai/nexus/chat`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://noteables-api.onrender.com/api'}/ai/nexus/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

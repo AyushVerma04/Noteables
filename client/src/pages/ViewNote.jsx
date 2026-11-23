@@ -126,7 +126,7 @@ export default function ViewNote() {
 
     try {
       const token = localStorage.getItem('noteables_token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/ai/chat/${note._id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://noteables-api.onrender.com/api'}/ai/chat/${note._id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -201,7 +201,7 @@ export default function ViewNote() {
       // OR for simplicity in MVP, we just expose the streaming endpoint if the backend allows GET without strict auth,
       // but assuming it needs auth, we'll fetch into a MediaSource or just Blob:
       toast.loading('Buffering audio stream...', { id: 'audio-toast' });
-      fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/audio/stream/${note._id}`, {
+      fetch(`${import.meta.env.VITE_API_URL || 'https://noteables-api.onrender.com/api'}/audio/stream/${note._id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => {

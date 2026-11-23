@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ForceGraph3D from 'react-force-graph-3d';
 import axios from '../api/axios';
-import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
 import SpriteText from 'three-spritetext';
@@ -9,7 +8,6 @@ import * as THREE from 'three';
 import SourceManager from '../components/SourceManager';
 
 export default function Brain() {
-  const { user } = useAuth();
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState(null);
